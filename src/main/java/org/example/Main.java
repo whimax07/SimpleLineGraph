@@ -1,9 +1,15 @@
 package org.example;
 
-import javax.swing.*;
-import java.awt.*;
-import java.util.ArrayList;
+
+
+import javax.swing.JFrame;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
+import java.awt.BorderLayout;
+import java.awt.Color;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -54,6 +60,30 @@ public class Main {
                 },
                 1_000, 1_000
         );
+    }
+
+    public static void createGraph(List<Double> xs, List<Double> ys) {
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                final JFrame frame = new JFrame("Simple Line Graph");
+                frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+                frame.setSize(1200, 800);
+
+                final JPanel mainPanel = new JPanel();
+                mainPanel.setBackground(Color.BLUE);
+                mainPanel.setLayout(new BorderLayout());
+
+                final LineGraph lineGraph = new LineGraph();
+
+                mainPanel.add(lineGraph);
+
+                frame.getContentPane().add(mainPanel);
+                frame.setVisible(true);
+                lineGraph.setData(xs, ys);
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
 

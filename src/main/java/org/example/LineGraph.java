@@ -2,18 +2,21 @@ package org.example;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalDouble;
 
 import static java.awt.RenderingHints.*;
 
 public class LineGraph extends JPanel {
 
     private final GraphArea graphArea = new GraphArea();
-    private final GraphAxis xAxis = new GraphAxis();
-    private final GraphAxis yAxis = new GraphAxis();
+    private final GraphAxis xAxis = new GraphAxis(GraphAxis.Type.X);
+    private final GraphAxis yAxis = new GraphAxis(GraphAxis.Type.Y);
+    private final List<Double> xData = new ArrayList<>();
+    private final List<Double> yData = new ArrayList<>();
 
     private boolean autoUpdateGraphDataRange = true;
 
@@ -22,6 +25,7 @@ public class LineGraph extends JPanel {
     public LineGraph() {
         addComponents();
         colourComponents();
+        addResizeListener();
     }
 
     private void addComponents() {
@@ -29,14 +33,18 @@ public class LineGraph extends JPanel {
 
         final GridBagConstraints gridBagConstraints = new GridBagConstraints();
 
-        gridBagConstraints.fill = GridBagConstraints.VERTICAL;
-        gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 0;
-        add(xAxis, gridBagConstraints);
-
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
+        gridBagConstraints.fill = GridBagConstraints.BOTH;
         gridBagConstraints.gridx = 1;
         gridBagConstraints.gridy = 1;
+        gridBagConstraints.weightx = 0;
+        gridBagConstraints.weighty = 1;
+        add(xAxis, gridBagConstraints);
+
+        gridBagConstraints.fill = GridBagConstraints.BOTH;
+        gridBagConstraints.gridx = 0;
+        gridBagConstraints.gridy = 0;
+        gridBagConstraints.weightx = 1;
+        gridBagConstraints.weighty = 0;
         add(yAxis, gridBagConstraints);
 
         gridBagConstraints.fill = GridBagConstraints.BOTH;
@@ -56,11 +64,24 @@ public class LineGraph extends JPanel {
         yAxis.setBackground(new Color(0x6E8755));
     }
 
+    private void addResizeListener() {
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                updateGraph(xData, yData);
+            }
+        });
+    }
+
+
 
     public <T extends Number> void setData(List<T> xData, List<T> yData) {
         if (xData.size() != yData.size()) {
             throw new RuntimeException("Data arrays of different size.");
         }
+
+        this.xData.clear();
+        this.yData.clear();
 
         if (xData.isEmpty()) {
             graphArea.clear();
@@ -71,6 +92,8 @@ public class LineGraph extends JPanel {
 
         final List<Double> xDoubles = xData.stream().map(Number::doubleValue).toList();
         final List<Double> yDoubles = yData.stream().map(Number::doubleValue).toList();
+        this.xData.addAll(xDoubles);
+        this.yData.addAll(yDoubles);
         updateGraph(xDoubles, yDoubles);
         repaint();
     }
@@ -143,9 +166,13 @@ public class LineGraph extends JPanel {
 
 
 
-    private record V2(double x, double y) {  }
+    public record V2(double x, double y) {  }
 
-    private record R2(double l, double h) {  }
+    public record R2(double l, double h) {
+        public double range() {
+            return h - l;
+        }
+    }
 
 
 
@@ -253,22 +280,28 @@ public class LineGraph extends JPanel {
 
     }
 
-    private static class GraphAxis extends JPanel {
+    protected static class GraphAxis extends JPanel {
 
         private static final double USAGE_MIN_X = 0.8;
         private static final double USAGE_MIN_Y = 0.4;
         private static final int MIN_TICK_SEPARATION = 5;
+        private static final int AXIS_GAP = 5;
+        private static final int TICK_LENGTH = 3;
 
+        private final Type type;
         private final Font monoSpacedFont;
 
         private List<AxisTick> axisTicks = new ArrayList<>();
         private R2 axisLimits = new R2(0, 0);
+        private int storedWidth = 0;
+        private int storedHeight = 0;
 
 
 
-        public GraphAxis() {
+        public GraphAxis(Type type) {
+            this.type = type;
             Font defualtFont = new JLabel().getFont();
-            monoSpacedFont = new Font(Font.MONOSPACED, Font.PLAIN, defualtFont.getSize());
+            this.monoSpacedFont = new Font(Font.MONOSPACED, Font.PLAIN, defualtFont.getSize() + 2);
         }
 
 
@@ -280,24 +313,31 @@ public class LineGraph extends JPanel {
                 return;
             }
 
+            final int oldHeight = storedHeight;
+            storedHeight = getHeight();
+            final int oldWidth = storedWidth;
+            storedWidth = getWidth();
+            final boolean sizeRedraw = storedWidth != oldWidth || storedHeight != oldHeight;
+
             final Graphics graphics = getGraphics();
             final FontMetrics fontMetrics = graphics.getFontMetrics(monoSpacedFont);
-            final int maxTickWidth = getMaxTickWidth(fontMetrics, data);
 
             if (!sameGate(data)) {
                 // If the gate is different then thread the x-axis the same as the y-axis.
                 final R2 axisBounds = calculateIrregularDataAxis(dataBounds);
-                if (!shouldRedrawIrregularAxis(axisLimits, axisBounds, USAGE_MIN_X)) return;
+                final boolean dataRedraw = shouldRedrawIrregularAxis(axisLimits, axisBounds, USAGE_MIN_X);
+                if (!sizeRedraw && !dataRedraw) return;
 
                 final int width = getWidth();
-                final int numberOfTicks = chooseNumberOfIrregularTicks(maxTickWidth, width);
+                final int numberOfTicks = chooseNumberOfIrregularTicks(axisBounds, width, fontMetrics);
 
                 axisTicks = calculateTicks(axisBounds, numberOfTicks);
                 axisLimits = axisBounds;
                 return;
             }
 
-            // Same gate.
+            // Same gate so redrawing is unnoticeable unless the data has changed or the size has.
+            final int maxTickWidth = getMaxTickWidth(fontMetrics, data);
             final int width = getWidth();
             final int tickGroupSize = chooseNumberOfRegularTicks(maxTickWidth, width, numDataPoints);
             final int numberOfTicks = (int) Math.ceil((double) numDataPoints / tickGroupSize);
@@ -321,7 +361,7 @@ public class LineGraph extends JPanel {
             final FontMetrics fontMetrics = getGraphics().getFontMetrics(monoSpacedFont);
             final int textHeight = fontMetrics.getHeight();
             final int height = getHeight();
-            final int numberOfTicks = chooseNumberOfIrregularTicks(textHeight, height);
+            final int numberOfTicks = 10;
 
             axisTicks = calculateTicks(axisBounds, numberOfTicks);
             axisLimits = axisBounds;
@@ -340,17 +380,37 @@ public class LineGraph extends JPanel {
         }
 
         private R2 calculateIrregularDataAxis(R2 dataBounds) {
-            final double difference = dataBounds.h - dataBounds.l;
+            final double difference = dataBounds.range();
             final int base10Size = calcBase10Size(difference);
-            final double lowerLimit = floorSf(dataBounds.l, base10Size - 2);
-            final double upperLimit = cellingSf(dataBounds.h, base10Size - 2);
+
+            // Divide the block size by 2 to round to 0 and 5.
+            final double blockSize = Math.pow(10, base10Size - 1) / 2;
+            final double lowerLimit = Math.floor(dataBounds.l / blockSize) * blockSize;
+            final double upperLimit = Math.ceil(dataBounds.h / blockSize) * blockSize;
+
             return new R2(lowerLimit, upperLimit);
         }
 
-        private int chooseNumberOfIrregularTicks(int tickSize, int totalSpace) {
-            final int maxTicks = totalSpace / (tickSize + MIN_TICK_SEPARATION);
-            final int targetNumTicks = (int) floorSf(maxTicks, 1);
-            return (targetNumTicks <= 0) ? maxTicks : targetNumTicks;
+        private int chooseNumberOfIrregularTicks(R2 axisLimits, int totalSpace, FontMetrics fontMetrics) {
+            int result = 10;
+            int spaceUsed = tickSpace(result, axisLimits, fontMetrics);
+
+            if (spaceUsed > totalSpace) {
+                while (spaceUsed > totalSpace) {
+                    result -= 1;
+                    spaceUsed = tickSpace(result, axisLimits, fontMetrics);
+                    if (result == 1) break;
+                }
+            } else {
+                do {
+                    result *= 2;
+                    spaceUsed = tickSpace(result, axisLimits, fontMetrics);
+                } while (spaceUsed < totalSpace);
+
+                result /= 2;
+            }
+
+            return result;
         }
 
         @SuppressWarnings("BooleanMethodIsAlwaysInverted")
@@ -358,13 +418,13 @@ public class LineGraph extends JPanel {
             // If the new bounds are "bigger" then the range should be recalculated.
             // TODO(Max): Only recalculate both sides if needed.
             if (newBounds.l < oldBounds.l || newBounds.h > oldBounds.h) return true;
-            final double newRange = newBounds.h - newBounds.l;
-            final double oldRange = oldBounds.h - oldBounds.l;
+            final double newRange = newBounds.range();
+            final double oldRange = oldBounds.range();
             return newRange / oldRange < minUsage;
         }
 
         private R2 calculateRegularDataAxis(R2 dataBounds, int numDataPoints, int numTicks, int tickGroupSize) {
-            final double range = dataBounds.h - dataBounds.l;
+            final double range = dataBounds.range();
             final double stride = range / (numDataPoints - 1);
             final double axisSpan = numTicks * tickGroupSize * stride;
 
@@ -385,11 +445,49 @@ public class LineGraph extends JPanel {
         }
 
 
+
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
+            g.setFont(monoSpacedFont);
 
+            switch (type) {
+                case X -> drawXLabels(g);
+                case Y -> drawYLabels(g);
+            }
+        }
 
+        private void drawXLabels(Graphics g) {
+            final double range = axisLimits.range();
+            final double pixelRatio = getWidth() / range;
+
+            final FontMetrics fontMetrics = g.getFontMetrics(monoSpacedFont);
+
+            for (AxisTick axisTick : axisTicks) {
+                final int position = (int) ((axisTick.value - axisLimits.l) * pixelRatio);
+                final int stringWidth = fontMetrics.stringWidth(axisTick.text);
+//                final int stringStart = (int) (position - (stringWidth / 2d));
+                g.drawString(axisTick.text, position, fontMetrics.getHeight());
+                g.drawLine(position, 0, position, TICK_LENGTH);
+            }
+        }
+
+        private void drawYLabels(Graphics g) {
+            final int height = getHeight();
+            final int width = getWidth();
+            final double range = axisLimits.range();
+            final double pixelRatio = height / range;
+
+            final FontMetrics fontMetrics = g.getFontMetrics(monoSpacedFont);
+
+            for (AxisTick axisTick : axisTicks) {
+                final double verticalPixelOffset = (axisTick.value - axisLimits.l) * pixelRatio;
+                final int yPosition = height - (int) verticalPixelOffset;
+                final int stringWidth = fontMetrics.stringWidth(axisTick.text);
+                final int stringStart = width - (stringWidth + AXIS_GAP);
+                g.drawString(axisTick.text, stringStart, yPosition);
+                g.drawLine(width, yPosition, width - TICK_LENGTH, yPosition);
+            }
         }
 
 
@@ -419,16 +517,29 @@ public class LineGraph extends JPanel {
         }
 
         private static List<AxisTick> calculateTicks(R2 tickRange, int numberOfTicks) {
-            final double stride = (tickRange.h - tickRange.l) / numberOfTicks;
+            final double stride = tickRange.range() / numberOfTicks;
             final ArrayList<AxisTick> ticks = new ArrayList<>();
 
-            for (int i = 0; i < numberOfTicks; i++) {
+            for (int i = 0; i <= numberOfTicks; i++) {
                 final double value = tickRange.l + (i * stride);
                 final AxisTick axisTick = new AxisTick(value, Double.toString(value));
                 ticks.add(axisTick);
             }
 
             return ticks;
+        }
+
+        private static int tickSpace(int numGaps, R2 axisLimits, FontMetrics fontMetrics) {
+            final double gap = axisLimits.range() / numGaps;
+            final String lowString = Double.toString(axisLimits.l + gap);
+            final String highString = Double.toString(axisLimits.h - gap);
+
+            final int sampleWidth = Math.max(
+                    fontMetrics.stringWidth(lowString),
+                    fontMetrics.stringWidth(highString)
+            );
+
+            return (numGaps + 1) * (sampleWidth + MIN_TICK_SEPARATION);
         }
 
         private static int getMaxTickWidth(FontMetrics fontMetrics, List<Double> data) {
@@ -448,27 +559,9 @@ public class LineGraph extends JPanel {
             return (int) Math.ceil(Math.log10(Math.abs(number)));
         }
 
-        private static double floorSf(double number, int significantFigures) {
-            if (number == 0) return 0;
-
-            final int base10Size = calcBase10Size(number);
-            final int shiftMagnitude = significantFigures - base10Size;
-
-            final double magnitude = Math.pow(10, shiftMagnitude);
-            return Math.floor(number / magnitude) * magnitude;
-        }
-
-        private static double cellingSf(double number, int significantFigures) {
-            if (number == 0) return 0;
-
-            final int base10Size = calcBase10Size(number);
-            final int shiftMagnitude = significantFigures - base10Size;
-
-            final double magnitude = Math.pow(10, shiftMagnitude);
-            return Math.ceil(number / magnitude) * magnitude;
-        }
 
 
+        public enum Type { X, Y }
 
         private record AxisTick(double value, String text) {  }
 
