@@ -337,14 +337,15 @@ public class LineGraph extends JPanel {
             }
 
             // Same gate so redrawing is unnoticeable unless the data has changed or the size has.
-            final int maxTickWidth = getMaxTickWidth(fontMetrics, data);
+            final int maxTickWidth = getMaxTickWidth(fontMetrics, dataBounds, data);
             final int width = getWidth();
             final int tickGroupSize = chooseNumberOfRegularTicks(maxTickWidth, width, numDataPoints);
             final int numberOfTicks = (int) Math.ceil((double) numDataPoints / tickGroupSize);
 
             final R2 axisBounds = calculateRegularDataAxis(dataBounds, numDataPoints, numberOfTicks, tickGroupSize);
 
-            // NOTE(Max): I am assuming that you either won't notice a regular axis being redrawn or they should be.
+            // NOTE(Max): I am assuming that either the user won't notice a regular axis being redrawn, or the axis
+            //  needs redrawing.
             axisTicks = calculateTicks(dataBounds, numberOfTicks);
             axisLimits = axisBounds;
         }
@@ -358,9 +359,7 @@ public class LineGraph extends JPanel {
             final R2 axisBounds = calculateIrregularDataAxis(dataBounds);
             if (!shouldRedrawIrregularAxis(axisLimits, axisBounds, USAGE_MIN_Y)) return;
 
-            final FontMetrics fontMetrics = getGraphics().getFontMetrics(monoSpacedFont);
-            final int textHeight = fontMetrics.getHeight();
-            final int height = getHeight();
+            // TODO(Max): Replace this.
             final int numberOfTicks = 10;
 
             axisTicks = calculateTicks(axisBounds, numberOfTicks);
@@ -465,8 +464,6 @@ public class LineGraph extends JPanel {
 
             for (AxisTick axisTick : axisTicks) {
                 final int position = (int) ((axisTick.value - axisLimits.l) * pixelRatio);
-                final int stringWidth = fontMetrics.stringWidth(axisTick.text);
-//                final int stringStart = (int) (position - (stringWidth / 2d));
                 g.drawString(axisTick.text, position, fontMetrics.getHeight());
                 g.drawLine(position, 0, position, TICK_LENGTH);
             }
@@ -518,11 +515,12 @@ public class LineGraph extends JPanel {
 
         private static List<AxisTick> calculateTicks(R2 tickRange, int numberOfTicks) {
             final double stride = tickRange.range() / numberOfTicks;
+            final String formatString = calcFormatString(tickRange.range());
             final ArrayList<AxisTick> ticks = new ArrayList<>();
 
             for (int i = 0; i <= numberOfTicks; i++) {
                 final double value = tickRange.l + (i * stride);
-                final AxisTick axisTick = new AxisTick(value, Double.toString(value));
+                final AxisTick axisTick = new AxisTick(value, String.format(formatString, value));
                 ticks.add(axisTick);
             }
 
@@ -531,8 +529,9 @@ public class LineGraph extends JPanel {
 
         private static int tickSpace(int numGaps, R2 axisLimits, FontMetrics fontMetrics) {
             final double gap = axisLimits.range() / numGaps;
-            final String lowString = Double.toString(axisLimits.l + gap);
-            final String highString = Double.toString(axisLimits.h - gap);
+            final String formatString = calcFormatString(axisLimits.range());
+            final String lowString = String.format(formatString, axisLimits.l + gap);
+            final String highString = String.format(formatString, axisLimits.h - gap);
 
             final int sampleWidth = Math.max(
                     fontMetrics.stringWidth(lowString),
@@ -542,9 +541,10 @@ public class LineGraph extends JPanel {
             return (numGaps + 1) * (sampleWidth + MIN_TICK_SEPARATION);
         }
 
-        private static int getMaxTickWidth(FontMetrics fontMetrics, List<Double> data) {
+        private static int getMaxTickWidth(FontMetrics fontMetrics, R2 dataBounds, List<Double> data) {
+            final String formatString = calcFormatString(dataBounds.range());
             return (int) data.stream()
-                    .map(d -> Double.toString(d))
+                    .map(d -> String.format(formatString, d))
                     .mapToDouble(fontMetrics::stringWidth)
                     .max()
                     .orElseThrow(() -> new RuntimeException(String.format(
@@ -557,6 +557,12 @@ public class LineGraph extends JPanel {
         private static int calcBase10Size(double number) {
             if (number == 0) return 0;
             return (int) Math.ceil(Math.log10(Math.abs(number)));
+        }
+
+        private static String calcFormatString(double dataRange) {
+            final int base10Size = calcBase10Size(dataRange);
+            final int numberOfDecimals = Math.max(4 - base10Size, 0);
+            return "%." + numberOfDecimals + "f";
         }
 
 
