@@ -2,8 +2,7 @@ package org.example;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
+import java.awt.event.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -164,6 +163,17 @@ public class LineGraph extends JPanel {
         g2.setRenderingHints(renderingHints);
     }
 
+    private static String calcFormatString(double dataRange) {
+        final int base10Size = calcBase10Size(dataRange);
+        final int numberOfDecimals = Math.max(4 - base10Size, 0);
+        return "%." + numberOfDecimals + "f";
+    }
+
+    private static int calcBase10Size(double number) {
+        if (number == 0) return 0;
+        return (int) Math.ceil(Math.log10(Math.abs(number)));
+    }
+
 
 
     public record V2(double x, double y) {  }
@@ -179,11 +189,22 @@ public class LineGraph extends JPanel {
     private static class GraphArea extends JPanel {
 
         private static final float LINE_WIDTH = 1.5f;
+        private static final float CROSS_HAIR_LINE_WIDTH = 0.75f;
+        private static final float CROSS_HAIR_ALPHA = 0.8f;
+        private static final Point CROSS_HAIR_GAP = new Point(10, 4);
 
         private final ArrayList<V2> graphData = new ArrayList<>();
+        private final GraphAreaMouseAdaptor mouseAdaptor = new GraphAreaMouseAdaptor(this);
 
         private R2 xAxisLimits;
         private R2 yAxisLimits;
+
+
+
+        public GraphArea() {
+            addMouseListener(mouseAdaptor);
+            addMouseMotionListener(mouseAdaptor);
+        }
 
 
 
@@ -216,7 +237,7 @@ public class LineGraph extends JPanel {
             super.paintComponent(g);
             final Graphics2D g2 = (Graphics2D) g;
             setRenderingHints(g2);
-            setStroke(g2);
+            setGraphStroke(g2);
 
             if (graphData.isEmpty()) {
                 displayText(g, "No Data");
@@ -228,6 +249,12 @@ public class LineGraph extends JPanel {
             }
 
             drawLine(g);
+
+            final Point mousePos = mouseAdaptor.mousePos;
+            if (mousePos != null) {
+                setCrossHairStroke(g2);
+                drawCrossHair(g, mousePos);
+            }
         }
 
         private void displayText(Graphics g, String text) {
@@ -238,7 +265,7 @@ public class LineGraph extends JPanel {
             g.drawString(text, x, y);
         }
 
-        private void setStroke(Graphics2D g2) {
+        private void setGraphStroke(Graphics2D g2) {
             final BasicStroke lineStyle = new BasicStroke(
                     LINE_WIDTH, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 2.0f
             );
@@ -278,13 +305,48 @@ public class LineGraph extends JPanel {
             );
         }
 
+        private void setCrossHairStroke(Graphics2D g2) {
+            final BasicStroke lineStyle = new BasicStroke(
+                    CROSS_HAIR_LINE_WIDTH, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 2.0f
+            );
+            g2.setStroke(lineStyle);
+
+            final float[] foreground = getForeground().getRGBColorComponents(null);
+            final Color colour = new Color(foreground[0], foreground[1], foreground[2], CROSS_HAIR_ALPHA);
+            g2.setColor(colour);
+        }
+
+        private void drawCrossHair(Graphics g, Point mousePos) {
+            // Horizontal line.
+            g.drawLine(0, mousePos.y, getWidth(), mousePos.y);
+            // Vertical line.
+            g.drawLine(mousePos.x, 0, mousePos.x, getHeight());
+
+            final double xRange = xAxisLimits.range();
+            final double yRange = yAxisLimits.range();
+
+            final double xValue = ((mousePos.x / (double) getWidth()) * xRange) + xAxisLimits.l;
+            final double yValue = yAxisLimits.h - ((mousePos.y / (double) getHeight()) * yRange);
+
+            final String xFormatString = calcFormatString(xRange);
+            final String yFormatString = calcFormatString(yRange);
+
+            final String xString = String.format(xFormatString, xValue);
+            final String yString = String.format(yFormatString, yValue);
+
+            final int fontHeight = g.getFontMetrics().getAscent();
+            final int rowHeight = fontHeight + CROSS_HAIR_GAP.y;
+            g.drawString("X: " + xString, CROSS_HAIR_GAP.x, rowHeight);
+            g.drawString("Y: " + yString, CROSS_HAIR_GAP.x, rowHeight * 2);
+        }
+
     }
 
     protected static class GraphAxis extends JPanel {
 
         private static final double USAGE_MIN_X = 0.8;
         private static final double USAGE_MIN_Y = 0.4;
-        private static final int MIN_TICK_SEPARATION = 5;
+        private static final int MIN_TICK_SEPARATION = 15;
         private static final int AXIS_GAP = 5;
         private static final int TICK_LENGTH = 3;
 
@@ -307,6 +369,7 @@ public class LineGraph extends JPanel {
 
 
         public void updateXAxis(R2 dataBounds, List<Double> data) {
+            if (data.isEmpty()) return;
             final int numDataPoints = data.size();
             if (numDataPoints == 1) {
                 singleDataPointAxis(data);
@@ -340,17 +403,18 @@ public class LineGraph extends JPanel {
             final int maxTickWidth = getMaxTickWidth(fontMetrics, dataBounds, data);
             final int width = getWidth();
             final int tickGroupSize = chooseNumberOfRegularTicks(maxTickWidth, width, numDataPoints);
-            final int numberOfTicks = (int) Math.ceil((double) numDataPoints / tickGroupSize);
+            final int numberOfTicks = (int) Math.ceil((double) numDataPoints / tickGroupSize) + 1;
 
             final R2 axisBounds = calculateRegularDataAxis(dataBounds, numDataPoints, numberOfTicks, tickGroupSize);
 
             // NOTE(Max): I am assuming that either the user won't notice a regular axis being redrawn, or the axis
             //  needs redrawing.
-            axisTicks = calculateTicks(dataBounds, numberOfTicks);
+            axisTicks = calculateTicks(axisBounds, numberOfTicks);
             axisLimits = axisBounds;
         }
 
         public void updateYAxis(R2 dataBounds, List<Double> data) {
+            if (data.isEmpty()) return;
             if (data.size() == 1) {
                 singleDataPointAxis(data);
                 return;
@@ -359,8 +423,8 @@ public class LineGraph extends JPanel {
             final R2 axisBounds = calculateIrregularDataAxis(dataBounds);
             if (!shouldRedrawIrregularAxis(axisLimits, axisBounds, USAGE_MIN_Y)) return;
 
-            // TODO(Max): Replace this.
-            final int numberOfTicks = 10;
+            // TODO(Max): Replace this. 11 is better than 10 because you get 10 strides.
+            final int numberOfTicks = 11;
 
             axisTicks = calculateTicks(axisBounds, numberOfTicks);
             axisLimits = axisBounds;
@@ -378,16 +442,14 @@ public class LineGraph extends JPanel {
             axisLimits = axisBounds;
         }
 
-        private R2 calculateIrregularDataAxis(R2 dataBounds) {
-            final double difference = dataBounds.range();
-            final int base10Size = calcBase10Size(difference);
-
-            // Divide the block size by 2 to round to 0 and 5.
-            final double blockSize = Math.pow(10, base10Size - 1) / 2;
-            final double lowerLimit = Math.floor(dataBounds.l / blockSize) * blockSize;
-            final double upperLimit = Math.ceil(dataBounds.h / blockSize) * blockSize;
-
-            return new R2(lowerLimit, upperLimit);
+        @SuppressWarnings("BooleanMethodIsAlwaysInverted")
+        private boolean shouldRedrawIrregularAxis(R2 oldBounds, R2 newBounds, double minUsage) {
+            // If the new bounds are "bigger" then the range should be recalculated.
+            // TODO(Max): Only recalculate both sides if needed.
+            if (newBounds.l < oldBounds.l || newBounds.h > oldBounds.h) return true;
+            final double newRange = newBounds.range();
+            final double oldRange = oldBounds.range();
+            return newRange / oldRange < minUsage;
         }
 
         private int chooseNumberOfIrregularTicks(R2 axisLimits, int totalSpace, FontMetrics fontMetrics) {
@@ -412,22 +474,16 @@ public class LineGraph extends JPanel {
             return result;
         }
 
-        @SuppressWarnings("BooleanMethodIsAlwaysInverted")
-        private boolean shouldRedrawIrregularAxis(R2 oldBounds, R2 newBounds, double minUsage) {
-            // If the new bounds are "bigger" then the range should be recalculated.
-            // TODO(Max): Only recalculate both sides if needed.
-            if (newBounds.l < oldBounds.l || newBounds.h > oldBounds.h) return true;
-            final double newRange = newBounds.range();
-            final double oldRange = oldBounds.range();
-            return newRange / oldRange < minUsage;
-        }
+        private R2 calculateIrregularDataAxis(R2 dataBounds) {
+            final double difference = dataBounds.range();
+            final int base10Size = calcBase10Size(difference);
 
-        private R2 calculateRegularDataAxis(R2 dataBounds, int numDataPoints, int numTicks, int tickGroupSize) {
-            final double range = dataBounds.range();
-            final double stride = range / (numDataPoints - 1);
-            final double axisSpan = numTicks * tickGroupSize * stride;
+            // Divide the block size by 2 to round to 0 and 5.
+            final double blockSize = Math.pow(10, base10Size - 1) / 2;
+            final double lowerLimit = Math.floor(dataBounds.l / blockSize) * blockSize;
+            final double upperLimit = Math.ceil(dataBounds.h / blockSize) * blockSize;
 
-            return new R2(dataBounds.l, dataBounds.l + axisSpan);
+            return new R2(lowerLimit, upperLimit);
         }
 
         private int chooseNumberOfRegularTicks(int maxTickWidth, int width, int numDataPoints) {
@@ -441,6 +497,14 @@ public class LineGraph extends JPanel {
             }
 
             return (int) groupSize;
+        }
+
+        private R2 calculateRegularDataAxis(R2 dataBounds, int numDataPoints, int numTicks, int tickGroupSize) {
+            final double range = dataBounds.range();
+            final double stride = range / (numDataPoints - 1);
+            final double axisSpan = (numTicks - 1) * (tickGroupSize * stride);
+
+            return new R2(dataBounds.l, dataBounds.l + axisSpan);
         }
 
 
@@ -514,7 +578,7 @@ public class LineGraph extends JPanel {
         }
 
         private static List<AxisTick> calculateTicks(R2 tickRange, int numberOfTicks) {
-            final double stride = tickRange.range() / numberOfTicks;
+            final double stride = tickRange.range() / (numberOfTicks - 1);
             final String formatString = calcFormatString(tickRange.range());
             final ArrayList<AxisTick> ticks = new ArrayList<>();
 
@@ -554,22 +618,42 @@ public class LineGraph extends JPanel {
 
 
 
-        private static int calcBase10Size(double number) {
-            if (number == 0) return 0;
-            return (int) Math.ceil(Math.log10(Math.abs(number)));
-        }
-
-        private static String calcFormatString(double dataRange) {
-            final int base10Size = calcBase10Size(dataRange);
-            final int numberOfDecimals = Math.max(4 - base10Size, 0);
-            return "%." + numberOfDecimals + "f";
-        }
-
-
-
         public enum Type { X, Y }
 
         private record AxisTick(double value, String text) {  }
+
+    }
+
+    private static class GraphAreaMouseAdaptor extends MouseAdapter {
+
+        private final GraphArea graphArea;
+
+        private Point mousePos;
+
+
+
+        private GraphAreaMouseAdaptor(GraphArea graphArea) {
+            this.graphArea = graphArea;
+        }
+
+
+
+        public Point getMousePos() {
+            return mousePos;
+        }
+
+        @Override
+        public void mouseExited(MouseEvent e) {
+            System.out.println("Mouse exited");
+            mousePos = null;
+            graphArea.repaint();
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            mousePos = e.getPoint();
+            graphArea.repaint();
+        }
 
     }
 

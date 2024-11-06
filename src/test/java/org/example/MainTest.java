@@ -21,12 +21,12 @@ public class MainTest {
 
     @Test
     public void lotsOfData() throws InterruptedException {
-        final List<Double> xs = IntStream.range(0, 100)
+        final List<Double> xs = IntStream.range(0, 98)
                 .asDoubleStream()
                 .boxed()
                 .toList();
 
-        final List<Double> ys = IntStream.range(0, 100)
+        final List<Double> ys = IntStream.range(0, 98)
                 .asDoubleStream()
                 .map(x -> x * 5)
                 .map(x -> Math.max(Math.abs(100 - x), 0))
