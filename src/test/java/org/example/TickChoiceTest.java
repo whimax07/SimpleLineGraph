@@ -62,6 +62,7 @@ public class TickChoiceTest {
         assertEquals(20.0, scaleToZero2Dp(200.0));
         assertEquals(31.1, scaleToZero2Dp(311.0));
         assertEquals(31.1, scaleToZero2Dp(31100.0));
+        assertEquals(51.18, scaleToZero2Dp(511846.34));
     }
 
     @Test
@@ -73,6 +74,7 @@ public class TickChoiceTest {
     public void scaleToZero_2Dp_LessThan1() {
         assertEquals(30.0, scaleToZero2Dp(0.3));
         assertEquals(31.1, scaleToZero2Dp(0.0311));
+        assertEquals(81.31, scaleToZero2Dp(0.00081311));
     }
 
     @Test
