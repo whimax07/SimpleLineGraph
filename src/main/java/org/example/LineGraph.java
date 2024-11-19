@@ -163,13 +163,13 @@ public class LineGraph extends JPanel {
         g2.setRenderingHints(renderingHints);
     }
 
-    private static String calcFormatString(double dataRange) {
+    public static String calcFormatString(double dataRange) {
         final int base10Size = calcBase10Size(dataRange);
         final int numberOfDecimals = Math.max(4 - base10Size, 0);
         return "%." + numberOfDecimals + "f";
     }
 
-    private static int calcBase10Size(double number) {
+    public static int calcBase10Size(double number) {
         if (number == 0) return 0;
         return (int) Math.ceil(Math.log10(Math.abs(number)));
     }
